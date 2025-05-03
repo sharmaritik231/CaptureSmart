@@ -5,6 +5,7 @@ import torchvision.transforms as transforms
 from PIL import Image
 import cv2
 import timm
+from torch import nn
 
 class EfficientNetRegressionModel(nn.Module):
     def __init__(self):
@@ -29,7 +30,6 @@ class EfficientNetRegressionModel(nn.Module):
         x = self.layer_norm(x)
         x = self.fnn(x)
         return self.head_ss_var(x), self.head_iso_var(x)
-
 
 
 # 1. Load model once and cache it
