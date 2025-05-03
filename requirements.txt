@@ -5,5 +5,11 @@ numpy>=1.26.4
 
 # Streamlit UI
 streamlit==1.22.0
-opencv-python==4.11.0.86
-streamlit_webrtc == 0.62.4
+streamlit-webrtc==0.62.4
+
+# Image handling (headless build, no libGL dependency)
+opencv-python-headless==4.11.0.86
+Pillow>=8.0.0
+
+# (optional) progress bars in training scripts
+tqdm>=4.60.0
