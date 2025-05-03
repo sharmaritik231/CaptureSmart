@@ -36,7 +36,7 @@ class EfficientNetRegressionModel(nn.Module):
 @st.cache_resource
 def load_model():
     model = EfficientNetRegressionModel()
-    state = torch.load("best_model_ss.pth", map_location=torch.device("cpu"))
+    state = torch.load("models/best_model_ss.pth", map_location=torch.device("cpu"))
     model.load_state_dict(state)
     model.eval()
     return model
