@@ -4,7 +4,33 @@ import torch
 import torchvision.transforms as transforms
 from PIL import Image
 import cv2
-from model import EfficientNetRegressionModel  # your model definition
+import timm
+
+class EfficientNetRegressionModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        # EfficientNet-Lite0 as feature extractor
+        self.feature_extractor = timm.create_model('efficientnet_lite0', pretrained=True, num_classes=0)
+
+        # Output is already [B, 1280]
+        self.layer_norm = nn.LayerNorm(1280)
+
+        self.fnn = nn.Sequential(
+            nn.Linear(1280, 512),
+            nn.ReLU()
+        )
+
+        self.head_ss_var  = nn.Linear(512, 1)
+        self.head_iso_var = nn.Linear(512, 1)
+
+    def forward(self, x):
+        x = self.feature_extractor(x)  # [B, 1280]
+        x = self.layer_norm(x)
+        x = self.fnn(x)
+        return self.head_ss_var(x), self.head_iso_var(x)
+
+
 
 # 1. Load model once and cache it
 @st.cache_resource
