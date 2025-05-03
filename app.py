@@ -8,6 +8,7 @@ import timm
 from torch import nn
 from av import VideoFrame
 
+# Define model class
 class EfficientNetRegressionModel(nn.Module):
     def __init__(self):
         super().__init__()
@@ -23,17 +24,7 @@ class EfficientNetRegressionModel(nn.Module):
         x = self.fnn(x)
         return self.head_ss_var(x), self.head_iso_var(x)
 
-@st.cache_resource
-def load_model():
-    model = EfficientNetRegressionModel()
-    state = torch.load("models/best_model_ss.pth", map_location=torch.device("cpu"))
-    model.load_state_dict(state)
-    model.eval()
-    return model
-
-model = load_model()
-
-# preprocessing
+# Preprocessing function
 def preprocess_frame(frame_bgr):
     rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     img = Image.fromarray(rgb).resize((224,224))
@@ -45,56 +36,44 @@ def preprocess_frame(frame_bgr):
     ])
     return transform(img).unsqueeze(0)
 
-# video processor
+# Video processor with in-frame prediction overlay
 class FrameProcessor(VideoTransformerBase):
+    def __init__(self):
+        self.model = EfficientNetRegressionModel()
+        state = torch.load("models/best_model_ss.pth", map_location=torch.device("cpu"))
+        self.model.load_state_dict(state)
+        self.model.eval()
+
     def recv(self, frame: VideoFrame) -> VideoFrame:
         img = frame.to_ndarray(format="bgr24")
-        self.last_frame = img
-        return VideoFrame.from_ndarray(img, format="bgr24")
+        # preprocess & predict
+        inp = preprocess_frame(img)
+        with torch.no_grad():
+            ss_var, iso_var = self.model(inp)
+        ss_val = ss_var.item()
+        iso_val = iso_var.item()
+        # overlay text
+        display = img.copy()
+        text = f"SS_var: {ss_val:.3f}, ISO_var: {iso_val:.3f}"
+        cv2.putText(display, text, (10,30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
+        return VideoFrame.from_ndarray(display, format="bgr24")
 
-# UI
+# Streamlit UI
 st.title("Problem 3: CaptureSmart AI – Blur-Aware Mobile Camera Control")
 st.markdown(
     """
     **Background:**  
     Capturing crisp photos in motion-heavy or low-light environments is tough...
+
+    The goal is to use AI to detect blur and adjust camera settings (shutter, exposure, ISO) dynamically.
+
+    **Use the live camera feed below—the SS_var and ISO_var predictions are overlaid in real time.**
     """
 )
 
-# sliders for camera controls
-shutter_ms = st.slider("Shutter Speed (ms)", min_value=1, max_value=1000, value=100)
-iso_val    = st.slider("ISO Sensitivity",    min_value=100, max_value=3200, value=400)
-
-# build constraints
-video_constraints = {
-    "width": 640,
-    "height": 480,
-    "frameRate": 30,
-    # advanced constraints (browser support varies)
-    "advanced": [
-        {"exposureTime": float(shutter_ms)},
-        {"isoSensitivity": float(iso_val)}
-    ]
-}
-
+# Start webcam with real-time overlay
 ctx = webrtc_streamer(
-    key=f"camera_{shutter_ms}_{iso_val}",
+    key="camera",
     video_processor_factory=FrameProcessor,
-    media_stream_constraints={"video": video_constraints, "audio": False},
+    media_stream_constraints={"video": True, "audio": False},
 )
-
-EPS = 0.01
-
-if ctx.video_processor and hasattr(ctx.video_processor, "last_frame"):
-    frame = ctx.video_processor.last_frame
-    inp = preprocess_frame(frame)
-    with torch.no_grad(): ss_var, iso_var = model(inp)
-    ss_val, iso_val_pred = ss_var.item(), iso_var.item()
-    st.image(frame, caption="Live Analyzed Frame", use_column_width=True)
-    st.write(f"**SS_var:** {ss_val:.4f} **ISO_var:** {iso_val_pred:.4f}")
-    if abs(ss_val) < EPS and abs(iso_val_pred) < EPS:
-        st.success("✅ Your capture is clean.")
-    else:
-        st.error("❌ Camera SS is not correct. Adjust settings and try again.")
-else:
-    st.warning("⚠️ Starting camera... please wait.")
