@@ -6,6 +6,7 @@ from PIL import Image
 import cv2
 import timm
 from torch import nn
+from av import VideoFrame
 
 class EfficientNetRegressionModel(nn.Module):
     def __init__(self):
@@ -62,12 +63,15 @@ def preprocess_frame(frame_bgr):
     ])
     return transform(img).unsqueeze(0)  # shape [1,3,224,224]
 
-# 3. Video processor to hold last frame
+# 3. Video processor to hold last frame (use recv instead of transform)
 class FrameProcessor(VideoTransformerBase):
-    def transform(self, frame):
-        # store most recent BGR frame
-        self.last_frame = frame.to_ndarray(format="bgr24")
-        return self.last_frame
+    def recv(self, frame: VideoFrame) -> VideoFrame:
+        # convert to numpy BGR
+        img = frame.to_ndarray(format="bgr24")
+        # store most recent frame
+        self.last_frame = img
+        # convert back to VideoFrame for output
+        return VideoFrame.from_ndarray(img, format="bgr24")
 
 # 4. Streamlit UI
 st.title("Problem 3: CaptureSmart AI – Blur-Aware Mobile Camera Control")
