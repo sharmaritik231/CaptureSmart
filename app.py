@@ -10,7 +10,7 @@ from model import EfficientNetRegressionModel  # your model definition
 @st.cache_resource
 def load_model():
     model = EfficientNetRegressionModel()
-    state = torch.load("model.pth", map_location=torch.device("cpu"))
+    state = torch.load("best_model_ss.pth", map_location=torch.device("cpu"))
     model.load_state_dict(state)
     model.eval()
     return model
