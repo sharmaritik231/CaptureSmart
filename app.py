@@ -54,7 +54,7 @@ class FrameProcessor(VideoTransformerBase):
         iso_val = iso_var.item()
         # overlay text
         display = img.copy()
-        text = f"SS_var: {ss_val:.3f}, ISO_var: {iso_val:.3f}"
+        text = f"SS Change: {ss_val:.3f}, ISO Change: {iso_val:.3f}"
         cv2.putText(display, text, (10,30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
         return VideoFrame.from_ndarray(display, format="bgr24")
 
