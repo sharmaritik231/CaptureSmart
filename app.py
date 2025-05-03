@@ -2,71 +2,74 @@ import streamlit as st
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 import torch
 import torchvision.transforms as transforms
-from torchvision.models import efficientnet_b0, EfficientNet_B0_Weights
 from PIL import Image
 import cv2
-import numpy as np
-from model import EfficientNetRegressionModel  # your model class
+from model import EfficientNetRegressionModel  # ensure this file defines your class
 
 
-# Load model
+# 1. Load the trained model (model.pth should be in the same directory)
 @st.cache_resource
 def load_model():
     model = EfficientNetRegressionModel()
-    model.load_state_dict(torch.load("model.pth", map_location=torch.device("cpu")))
+    state = torch.load("model.pth", map_location=torch.device("cpu"))
+    model.load_state_dict(state)
     model.eval()
     return model
 
 model = load_model()
 
-# Define preprocessing to match ImageDataset
-def preprocess_image_opencv(frame_bgr):
-    # Convert BGR (OpenCV) to RGB (PIL expects RGB)
-    image = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-    image = Image.fromarray(image)
 
-    # Resize to (224, 224)
-    image = image.resize((224, 224))
+# 2. Preprocessing function matching your ImageDataset
+def preprocess_frame(frame_bgr):
+    # BGR (OpenCV) → RGB → PIL Image
+    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    img = Image.fromarray(rgb)
 
-    # Convert to grayscale and replicate channels to get RGB
-    image = image.convert("L")  # grayscale
-    image = Image.merge("RGB", (image, image, image))
+    # Resize
+    img = img.resize((224, 224))
 
-    # Apply tensor and normalization
+    # GRAYSCALE → replicate to 3-channel RGB
+    gray = img.convert("L")
+    img = Image.merge("RGB", (gray, gray, gray))
+
+    # ToTensor + Normalize(mean=0.5, std=0.5)
     transform = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+        transforms.Normalize(mean=[0.5]*3, std=[0.5]*3)
     ])
-    return transform(image).unsqueeze(0)  # shape: [1, 3, 224, 224]
+    tensor = transform(img).unsqueeze(0)  # shape [1,3,224,224]
+    return tensor
 
 
-# Camera frame processor
+# 3. Webcam frame processor
 class FrameProcessor(VideoTransformerBase):
     def transform(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-        self.last_frame = img
-        return img
+        # store the latest BGR frame for prediction
+        self.last_frame = frame.to_ndarray(format="bgr24")
+        return self.last_frame
 
-# Streamlit UI
-st.title("SS_var and ISO_var Predictor")
-st.write("Open your webcam and capture an image to get predictions.")
 
-ctx = webrtc_streamer(key="camera", video_processor_factory=FrameProcessor)
+# 4. Streamlit UI
+st.title("🖼️ SS_var & ISO_var Predictor")
+st.write("Use your webcam to capture a frame, then click **Predict** to see the scores.")
 
-if st.button("Predict from current frame"):
+ctx = webrtc_streamer(
+    key="camera",
+    video_processor_factory=FrameProcessor,
+    media_stream_constraints={"video": True, "audio": False},
+)
+
+if st.button("Predict"):
     if ctx.video_processor and hasattr(ctx.video_processor, "last_frame"):
         frame = ctx.video_processor.last_frame
 
-        # Preprocess image using the same steps as ImageDataset
-        input_tensor = preprocess_image_opencv(frame)
-
-        # Predict
+        # preprocess & predict
+        inp = preprocess_frame(frame)
         with torch.no_grad():
-            ss_score, iso_score = model(input_tensor)
+            ss_out, iso_out = model(inp)
 
-        # Display results
+        # display
         st.image(frame, caption="Captured Frame", use_column_width=True)
-        st.success(f"SS_var: {ss_score.item():.4f}")
-        st.success(f"ISO_var: {iso_score.item():.4f}")
+        st.markdown(f"**SS_var:** {ss_out.item():.4f}  **ISO_var:** {iso_out.item():.4f}")
     else:
-        st.warning("Please start the webcam and try again.")
+        st.warning("⚠️ Webcam not active yet—please allow camera access.")
