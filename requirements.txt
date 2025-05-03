@@ -6,3 +6,4 @@ numpy>=1.26.4
 # Streamlit UI
 streamlit==1.22.0
 opencv-python==4.11.0.86
+streamlit_webrtc == 0.62.4
