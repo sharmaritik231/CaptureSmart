@@ -1,28 +1,48 @@
-import streamlit as st
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
+from flask import Flask, render_template, Response, request
 import torch
 import torchvision.transforms as transforms
 from PIL import Image
 import cv2
 import timm
 from torch import nn
-from av import VideoFrame
+import numpy as np
 
-# 1. Model Definition
+app = Flask(__name__)
+
+# 1. Updated Model Definition
 class EfficientNetRegressionModel(nn.Module):
     def __init__(self):
         super().__init__()
+
+        # EfficientNet-Lite0 as feature extractor
         self.feature_extractor = timm.create_model('efficientnet_lite0', pretrained=True, num_classes=0)
+
+        # Output is already [B, 1280]
         self.layer_norm = nn.LayerNorm(1280)
-        self.fnn = nn.Sequential(nn.Linear(1280, 512), nn.ReLU())
-        self.head_ss_var  = nn.Linear(512, 1)
-        self.head_iso_var = nn.Linear(512, 1)
+
+        self.fnn = nn.Sequential(
+            nn.Linear(1280, 128),
+            nn.ReLU()
+        )
+
+        self.head_ss_var  = nn.Linear(128, 1)
+        self.head_iso_var = nn.Linear(128, 1)
 
     def forward(self, x):
-        x = self.feature_extractor(x)
+        # Feature extraction
+        x = self.feature_extractor(x)  # [B, 1280]
+
+        # Layer normalization
         x = self.layer_norm(x)
+
+        # Fully connected layers
         x = self.fnn(x)
-        return self.head_ss_var(x), self.head_iso_var(x)
+
+        # Separate heads for SS and ISO predictions
+        ss_var = self.head_ss_var(x)
+        iso_var = self.head_iso_var(x)
+
+        return ss_var, iso_var
 
 # 2. Preprocessing
 def preprocess_frame(frame_bgr):
@@ -36,59 +56,57 @@ def preprocess_frame(frame_bgr):
     ])
     return transform(img).unsqueeze(0)
 
-# 3. Video Processor
-class FrameProcessor(VideoTransformerBase):
-    def __init__(self):
-        self.model = EfficientNetRegressionModel()
-        state = torch.load("models/best_model_ss.pth", map_location=torch.device("cpu"))
-        self.model.load_state_dict(state)
-        self.model.eval()
+# Initialize model
+model = EfficientNetRegressionModel()
+state = torch.load("best_model_ss.pth", map_location=torch.device("cpu"))
+model.load_state_dict(state)
+model.eval()
 
-    def recv(self, frame: VideoFrame) -> VideoFrame:
-        img = frame.to_ndarray(format="bgr24")
-        inp = preprocess_frame(img)
-        with torch.no_grad():
-            ss_var, iso_var = self.model(inp)
-        ss_val, iso_val = ss_var.item(), iso_var.item()
-        display = img.copy()
-        text = f"SS Change: {ss_val:.3f}, ISO Change: {iso_val:.3f}"
-        cv2.putText(display, text, (10,30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,0), 2)
-        return VideoFrame.from_ndarray(display, format="bgr24")
+# Variables for Shutter Speed and ISO
+shutter_speed = 100  # Default
+iso_setting = 400  # Default
 
-# 4. Streamlit UI
-st.title("Problem 3: CaptureSmart AI – Blur-Aware Mobile Camera Control")
-st.markdown(
-    """
-    **Background:**  
-    Capturing crisp photos in motion-heavy or low-light environments is tough. Auto camera settings often fail under blur-inducing scenarios.
+# 3. Video Generator
+def generate_frames():
+    cap = cv2.VideoCapture(0)  # OpenCV captures video from the default webcam
+    while True:
+        success, frame = cap.read()
+        if not success:
+            break
+        else:
+            inp = preprocess_frame(frame)
+            with torch.no_grad():
+                ss_var, iso_var = model(inp)
+            ss_val, iso_val = ss_var.item(), iso_var.item()
 
-    The goal is to detect blur using AI and dynamically adjust **shutter speed** and **ISO** settings to optimize image sharpness.
+            # Overlay predictions on the frame
+            display = frame.copy()
+            text = f"SS Change: {ss_val:.3f}, ISO Change: {iso_val:.3f}"
+            cv2.putText(display, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-    **Use the sliders below to tweak camera parameters in real time; predictions overlay on the live feed.**
-    """
-)
+            # Encode frame as JPEG
+            ret, buffer = cv2.imencode('.jpg', display)
+            frame = buffer.tobytes()
 
-# 5. User Controls
-shutter_ms = st.slider("Shutter Speed (ms)", min_value=1, max_value=1000, value=100)
-iso_setting = st.slider("ISO Sensitivity", min_value=100, max_value=3200, value=400)
+            # Yield the frame to be displayed
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
-# 6. Camera Constraints
-video_constraints = {
-    "width": 640,
-    "height": 480,
-    "frameRate": 30,
-    "advanced": [
-        {"exposureTime": float(shutter_ms)},
-        {"isoSensitivity": float(iso_setting)}
-    ]
-}
+# 4. Routes
+@app.route('/')
+def index():
+    return render_template('index.html')
 
-# 7. Start Stream
-ctx = webrtc_streamer(
-    key=f"camera_{shutter_ms}_{iso_setting}",
-    video_processor_factory=FrameProcessor,
-    media_stream_constraints={"video": video_constraints, "audio": False},
-)
+@app.route('/video_feed')
+def video_feed():
+    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-if not ctx.state.playing:
-    st.warning("⚠️ Starting camera... please wait or allow access.")
+@app.route('/update_settings', methods=['POST'])
+def update_settings():
+    global shutter_speed, iso_setting
+    shutter_speed = int(request.form.get('shutter_speed', 100))
+    iso_setting = int(request.form.get('iso_setting', 400))
+    return "Settings updated", 200
+
+if __name__ == '__main__':
+    app.run(debug=True)
