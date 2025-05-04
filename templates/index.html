@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CaptureSmart AI – Blur-Aware Mobile Camera Control</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #video-container {
+            margin-top: 20px;
+        }
+        form {
+            margin-top: 20px;
+        }
+        label {
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>CaptureSmart AI – Blur-Aware Mobile Camera Control</h1>
+    <p>Capturing crisp photos in motion-heavy or low-light environments is tough. Use the sliders below to tweak camera parameters in real time; predictions overlay on the live feed.</p>
+    
+    <div id="video-container">
+        <img src="{{ url_for('video_feed') }}" alt="Video Feed" width="640" height="480">
+    </div>
+
+    <form id="settings-form">
+        <label for="shutter_speed">Shutter Speed (ms):</label>
+        <input type="range" id="shutter_speed" name="shutter_speed" min="1" max="1000" value="100">
+        <span id="shutter_speed_value">100</span>
+
+        <label for="iso_setting">ISO Sensitivity:</label>
+        <input type="range" id="iso_setting" name="iso_setting" min="100" max="3200" value="400">
+        <span id="iso_setting_value">400</span>
+
+        <button type="button" onclick="updateSettings()">Update Settings</button>
+    </form>
+
+    <script>
+        const shutterSpeedInput = document.getElementById('shutter_speed');
+        const isoSettingInput = document.getElementById('iso_setting');
+        const shutterSpeedValue = document.getElementById('shutter_speed_value');
+        const isoSettingValue = document.getElementById('iso_setting_value');
+
+        shutterSpeedInput.addEventListener('input', () => {
+            shutterSpeedValue.textContent = shutterSpeedInput.value;
+        });
+
+        isoSettingInput.addEventListener('input', () => {
+            isoSettingValue.textContent = isoSettingInput.value;
+        });
+
+        function updateSettings() {
+            const formData = new FormData(document.getElementById('settings-form'));
+            fetch('/update_settings', {
+                method: 'POST',
+                body: formData
+            }).then(response => {
+                if (response.ok) {
+                    alert('Settings updated successfully!');
+                } else {
+                    alert('Failed to update settings.');
+                }
+            });
+        }
+    </script>
+</body>
+</html>
